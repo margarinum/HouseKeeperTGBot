@@ -7,8 +7,6 @@ CANCEL_BTN = "Отмена"
 DOCS_BTN = "Документация"
 FAQ_BTN = "Ответы на частые вопросы"
 AI_BTN = "❓ Задать вопрос"
-BARRIER_BTN = "🚗 Спросить про шлагбаум"
-BOT_AI_BTN = "🤖 Спросить про бот"
 
 
 def main_menu(is_verified: bool, is_admin: bool = False) -> ReplyKeyboardMarkup:
@@ -19,10 +17,6 @@ def main_menu(is_verified: bool, is_admin: bool = False) -> ReplyKeyboardMarkup:
         rows.append([KeyboardButton(text=VERIFY_BTN)])
     if is_verified:
         rows.append([KeyboardButton(text=DOCS_BTN)])
-        rows.append([
-            KeyboardButton(text=BARRIER_BTN),
-            KeyboardButton(text=BOT_AI_BTN),
-        ])
         rows.append([KeyboardButton(text=AI_BTN)])
     rows.append([KeyboardButton(text=FAQ_BTN)])
     if is_admin:

@@ -32,8 +32,6 @@ from .keyboards import (
     DOCS_BTN,
     FAQ_BTN,
     AI_BTN,
-    BARRIER_BTN,
-    BOT_AI_BTN,
     ADMIN_BTN,
     CANCEL_BTN,
     DELETE_VERIFY_BTN,
@@ -1851,17 +1849,7 @@ async def _ai_start_topic(message: Message, state: FSMContext, topic: str, promp
 
 @router.message(F.text == AI_BTN)
 async def ai_start(message: Message, state: FSMContext) -> None:
-    await _ai_start_topic(message, state, "general", "Задайте ваш вопрос (поиск по всем документам):")
-
-
-@router.message(F.text == BARRIER_BTN)
-async def ai_start_barrier(message: Message, state: FSMContext) -> None:
-    await _ai_start_topic(message, state, "barrier", "Задайте вопрос про шлагбаум:")
-
-
-@router.message(F.text == BOT_AI_BTN)
-async def ai_start_bot(message: Message, state: FSMContext) -> None:
-    await _ai_start_topic(message, state, "bot", "Задайте вопрос про бот:")
+    await _ai_start_topic(message, state, "general", "Задайте ваш вопрос:")
 
 
 @router.message(StateFilter(AdminStates.waiting_for_ai_question))
@@ -1874,7 +1862,7 @@ async def ai_answer(message: Message, state: FSMContext) -> None:
         await message.answer("Пожалуйста, введите вопрос текстом.")
         return
     data = await state.get_data()
-    topic = data.get("ai_topic", "barrier")
+    topic = data.get("ai_topic", "general")
     await state.clear()
     thinking = await message.answer("⏳ Ищу ответ...")
     answer = await app.ai.ask(topic, question)
