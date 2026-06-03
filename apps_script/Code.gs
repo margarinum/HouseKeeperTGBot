@@ -27,6 +27,7 @@ function doPost(e) {
     if (action === 'verify') return verifyUser(sheet, data);
     if (action === 'find_user') return findUser(sheet, data.user_id);
     if (action === 'list_users') return listUsers(sheet);
+    if (action === 'list_paid_users') return listPaidUsers(sheet);
     if (action === 'remove') return removeUser(sheet, data.user_id);
     if (action === 'get_houses') return getHouses(sheet);
     if (action === 'get_all_rows') return getAllRows(sheet);
@@ -46,7 +47,8 @@ function getData(sheet) {
     house: headers.indexOf('Номер дома'),
     entrance: headers.indexOf('Номер подъезда'),
     floor: headers.indexOf('Этаж'),
-    apartment: headers.indexOf('Номер квартиры')
+    apartment: headers.indexOf('Номер квартиры'),
+    payed: headers.indexOf('payed')
   };
 
   if (indexes.house === -1 || indexes.entrance === -1 || indexes.floor === -1 || indexes.apartment === -1) {
@@ -54,6 +56,12 @@ function getData(sheet) {
   }
 
   return { values, headers, indexes };
+}
+
+function isRowPaid(row, indexes) {
+  if (indexes.payed === -1) return false;
+  const val = normalizeValue(row[indexes.payed]);
+  return val === '1' || val === 1;
 }
 
 function normalizeValue(value) {
@@ -173,12 +181,12 @@ function verifyUser(sheet, data) {
 }
 
 
-function listUsers(sheet) {
-  const { values, headers, indexes } = getData(sheet);
+function collectUsersFromRows(values, headers, indexes, onlyPaid) {
   const users = [];
 
   for (let i = 1; i < values.length; i++) {
     const row = values[i];
+    if (onlyPaid && !isRowPaid(row, indexes)) continue;
 
     for (let col = 0; col < headers.length; col++) {
       const header = String(headers[col] || '').trim();
@@ -198,12 +206,23 @@ function listUsers(sheet) {
         entrance: normalizeValue(row[indexes.entrance]),
         floor: normalizeValue(row[indexes.floor]),
         apartment: normalizeValue(row[indexes.apartment]),
+        payed: isRowPaid(row, indexes) ? '1' : '0',
         row_index: i + 1
       });
     }
   }
 
-  return jsonResponse({ status: 'ok', users: users });
+  return users;
+}
+
+function listUsers(sheet) {
+  const { values, headers, indexes } = getData(sheet);
+  return jsonResponse({ status: 'ok', users: collectUsersFromRows(values, headers, indexes, false) });
+}
+
+function listPaidUsers(sheet) {
+  const { values, headers, indexes } = getData(sheet);
+  return jsonResponse({ status: 'ok', users: collectUsersFromRows(values, headers, indexes, true) });
 }
 
 function findUser(sheet, userId) {
@@ -322,7 +341,15 @@ function getAllRows(sheet) {
     const entrance = String(row[indexes.entrance] || '').trim();
     const floor    = String(row[indexes.floor]    || '').trim();
     const apartment= String(row[indexes.apartment]|| '').trim();
-    if (house) rows.push({ house, entrance, floor, apartment });
+    if (house) {
+      rows.push({
+        house: house,
+        entrance: entrance,
+        floor: floor,
+        apartment: apartment,
+        payed: isRowPaid(row, indexes) ? '1' : '0'
+      });
+    }
   }
   return jsonResponse({ status: 'ok', rows: rows });
 }
@@ -344,4 +371,46 @@ function jsonResponse(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * Запустите один раз вручную: редактор Apps Script → выберите setupPayedColumn → Выполнить.
+ * Добавляет столбец payed после «Номер квартиры» и ставит 0 во всех строках, где пусто.
+ */
+function setupPayedColumn() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  if (!sheet) {
+    throw new Error('Sheet not found: ' + SHEET_NAME);
+  }
+
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  let payedCol0 = headers.indexOf('payed');
+
+  if (payedCol0 === -1) {
+    const aptCol0 = headers.indexOf('Номер квартиры');
+    if (aptCol0 === -1) {
+      throw new Error('Столбец «Номер квартиры» не найден');
+    }
+    sheet.insertColumnAfter(aptCol0 + 1);
+    payedCol0 = aptCol0;
+    sheet.getRange(1, payedCol0 + 1).setValue('payed');
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    return;
+  }
+
+  const dataRange = sheet.getRange(2, payedCol0 + 1, lastRow - 1, 1);
+  const current = dataRange.getValues();
+  const updates = current.map(function (row) {
+    const v = normalizeValue(row[0]);
+    if (v === '1' || v === 1) {
+      return [1];
+    }
+    return [0];
+  });
+  dataRange.setValues(updates);
+  SpreadsheetApp.flush();
 }

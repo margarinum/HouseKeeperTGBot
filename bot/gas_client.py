@@ -94,6 +94,10 @@ class GasClient:
         data = await self._post({"action": "list_users"})
         return data.get("users") or []
 
+    async def list_paid_users(self) -> list[dict]:
+        data = await self._post({"action": "list_paid_users"})
+        return data.get("users") or []
+
     async def remove_user(self, user_id: int) -> bool:
         data = await self._post({"action": "remove", "user_id": str(user_id)})
         return bool(data.get("removed"))

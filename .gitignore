@@ -22,3 +22,8 @@ Thumbs.db
 # Archives and server dumps (local only)
 *.tar.gz
 house_bot_server/
+
+# Large docs with Cyrillic names — keep on server locally, not in git
+documents/
+knowledge/
+bot/knowledge/

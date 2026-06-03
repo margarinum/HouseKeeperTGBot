@@ -38,6 +38,7 @@ def admin_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Ответы на частые вопросы", callback_data="admin:faq")],
         [InlineKeyboardButton(text="Неверифицированные", callback_data="admin:unverified_actions")],
         [InlineKeyboardButton(text="Верифицированные", callback_data="admin:verified_actions")],
+        [InlineKeyboardButton(text="Оплатившие", callback_data="admin:paid_actions")],
         [InlineKeyboardButton(text="Синхронизировать участников с группой", callback_data="admin:sync_table")],
         [InlineKeyboardButton(text="Снять лимит регистрации на квартиру", callback_data="verified:remove_limit")],
         [InlineKeyboardButton(text="Администраторы", callback_data="admin:list_admins")],
@@ -68,6 +69,15 @@ def verified_actions_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Экспорт верифицированных", callback_data="admin:export_verified")],
         [InlineKeyboardButton(text="Отправить сообщение", callback_data="admin:broadcast")],
         [InlineKeyboardButton(text="Создать голосование", callback_data="admin:create_poll")],
+        [InlineKeyboardButton(text="Назад", callback_data="admin:back")],
+    ])
+
+
+def paid_actions_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Экспорт оплативших", callback_data="paid:export")],
+        [InlineKeyboardButton(text="Отправить сообщение", callback_data="paid:broadcast")],
+        [InlineKeyboardButton(text="Создать голосование", callback_data="paid:create_poll")],
         [InlineKeyboardButton(text="Назад", callback_data="admin:back")],
     ])
 

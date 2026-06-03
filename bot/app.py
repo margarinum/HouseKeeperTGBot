@@ -43,6 +43,7 @@ from .keyboards import (
     houses_menu,
     unverified_actions_menu,
     verified_actions_menu,
+    paid_actions_menu,
     confirm_revoke_menu,
 )
 from .membership import MembershipManager
@@ -232,6 +233,31 @@ async def get_unverified_action_users() -> List[dict]:
 
     logger.info("Unverified action users collected: %s", len(result))
     return result
+
+
+def _parse_user_ids_from_gas_users(users: list[dict]) -> list[int]:
+    ids: list[int] = []
+    seen: set[int] = set()
+    for item in users:
+        raw = str(item.get("user_id", "")).strip()
+        if not raw.isdigit():
+            continue
+        user_id = int(raw)
+        if user_id in seen:
+            continue
+        seen.add(user_id)
+        ids.append(user_id)
+    return ids
+
+
+async def get_message_recipient_ids(audience: str) -> list[int]:
+    """audience: 'verified' — SQLite; 'paid' — строки таблицы с payed=1."""
+    assert app is not None
+    if audience == "paid":
+        users = await app.gas.list_paid_users()
+        return _parse_user_ids_from_gas_users(users)
+    verifications = await app.storage.list_all_verifications()
+    return [int(v["user_id"]) for v in verifications]
 
 
 async def fail_verification_attempt(message: Message, state: FSMContext, reason: str) -> None:
@@ -581,6 +607,21 @@ async def admin_verified_actions(callback: CallbackQuery) -> None:
         await callback.answer("Нет доступа", show_alert=True)
         return
     await callback.message.answer("Верифицированные", reply_markup=verified_actions_menu())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin:paid_actions")
+async def admin_paid_actions(callback: CallbackQuery) -> None:
+    if not is_private_callback(callback):
+        await reject_group_callback(callback)
+        return
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    await callback.message.answer(
+        "Оплатившие (квартиры с payed=1 в таблице)",
+        reply_markup=paid_actions_menu(),
+    )
     await callback.answer()
 
 
@@ -1006,6 +1047,48 @@ async def admin_export_verified(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+@router.callback_query(F.data == "paid:export")
+async def admin_export_paid(callback: CallbackQuery) -> None:
+    assert app is not None
+    if not is_private_callback(callback):
+        await reject_group_callback(callback)
+        return
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    try:
+        users = await app.gas.list_paid_users()
+    except GasClientError:
+        logger.exception("Failed to export paid users")
+        await callback.message.answer("Не удалось загрузить список из таблицы.")
+        await callback.answer()
+        return
+    if not users:
+        await callback.message.answer("Нет пользователей в квартирах с payed=1.")
+        await callback.answer()
+        return
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Оплатившие"
+    ws.append(["Дом", "Подъезд", "Квартира", "Имя пользователя", "Идентификатор", "payed"])
+    for user in users:
+        ws.append([
+            user.get("house", ""),
+            user.get("entrance", ""),
+            user.get("apartment", ""),
+            user.get("display_name", ""),
+            user.get("user_id", ""),
+            user.get("payed", "1"),
+        ])
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    document = BufferedInputFile(buffer.read(), filename="paid_users.xlsx")
+    await callback.message.answer(f"Оплативших пользователей: {len(users)}")
+    await callback.message.answer_document(document)
+    await callback.answer()
+
+
 @router.callback_query(F.data == "verified:remove_limit")
 async def admin_remove_limit_start(callback: CallbackQuery, state: FSMContext) -> None:
     assert app is not None
@@ -1225,9 +1308,28 @@ async def admin_broadcast_start(callback: CallbackQuery, state: FSMContext) -> N
     if not await is_admin(callback.from_user.id):
         await callback.answer("Нет доступа", show_alert=True)
         return
+    await state.update_data(message_audience="verified")
     await state.set_state(AdminStates.waiting_for_broadcast_message)
     await callback.message.answer(
         "Введите текст сообщения для рассылки всем верифицированным.\n"
+        "Поддерживается HTML-форматирование (<b>жирный</b>, <i>курсив</i>).\n"
+        "Для отмены нажмите Отмена."
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "paid:broadcast")
+async def admin_paid_broadcast_start(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_private_callback(callback):
+        await reject_group_callback(callback)
+        return
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    await state.update_data(message_audience="paid")
+    await state.set_state(AdminStates.waiting_for_broadcast_message)
+    await callback.message.answer(
+        "Введите текст сообщения для рассылки оплатившим (квартиры с payed=1 в таблице).\n"
         "Поддерживается HTML-форматирование (<b>жирный</b>, <i>курсив</i>).\n"
         "Для отмены нажмите Отмена."
     )
@@ -1249,25 +1351,34 @@ async def admin_broadcast_send(message: Message, state: FSMContext) -> None:
         await message.answer("Сообщение не может быть пустым.")
         return
 
-    verifications = await app.storage.list_all_verifications()
-    if not verifications:
+    data = await state.get_data()
+    audience = data.get("message_audience", "verified")
+    try:
+        recipient_ids = await get_message_recipient_ids(audience)
+    except GasClientError:
+        logger.exception("Failed to load recipients for broadcast audience=%s", audience)
+        await send_base_error(message)
+        return
+
+    if not recipient_ids:
         await state.clear()
-        await message.answer("Нет верифицированных пользователей.", reply_markup=await build_main_menu(message.from_user.id))
+        label = "оплативших" if audience == "paid" else "верифицированных"
+        await message.answer(f"Нет {label} пользователей.", reply_markup=await build_main_menu(message.from_user.id))
         return
 
     await state.clear()
     sent, failed = 0, 0
-    progress_msg = await message.answer(f"Отправляю... 0 / {len(verifications)}")
+    progress_msg = await message.answer(f"Отправляю... 0 / {len(recipient_ids)}")
 
-    for i, v in enumerate(verifications):
+    for i, user_id in enumerate(recipient_ids):
         try:
-            await app.bot.send_message(v["user_id"], text)
+            await app.bot.send_message(user_id, text)
             sent += 1
         except Exception:
             failed += 1
         if (i + 1) % 10 == 0:
             try:
-                await progress_msg.edit_text(f"Отправляю... {i+1} / {len(verifications)}")
+                await progress_msg.edit_text(f"Отправляю... {i+1} / {len(recipient_ids)}")
             except Exception:
                 pass
 
@@ -1287,8 +1398,23 @@ async def admin_create_poll_start(callback: CallbackQuery, state: FSMContext) ->
     if not await is_admin(callback.from_user.id):
         await callback.answer("Нет доступа", show_alert=True)
         return
+    await state.update_data(message_audience="verified")
     await state.set_state(AdminStates.waiting_for_poll_question)
-    await callback.message.answer("Введите вопрос голосования:")
+    await callback.message.answer("Введите вопрос голосования (для верифицированных):")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "paid:create_poll")
+async def admin_paid_create_poll_start(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_private_callback(callback):
+        await reject_group_callback(callback)
+        return
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    await state.update_data(message_audience="paid")
+    await state.set_state(AdminStates.waiting_for_poll_question)
+    await callback.message.answer("Введите вопрос голосования (для оплативших):")
     await callback.answer()
 
 
@@ -1332,9 +1458,18 @@ async def admin_poll_options(message: Message, state: FSMContext) -> None:
         await state.clear()
 
         poll_options = await app.storage.get_poll_options(poll_id)
-        verifications = await app.storage.list_all_verifications()
+        audience = data.get("message_audience", "verified")
+        try:
+            recipient_ids = await get_message_recipient_ids(audience)
+        except GasClientError:
+            logger.exception("Failed to load recipients for poll audience=%s", audience)
+            await send_base_error(message)
+            return
+        if not recipient_ids:
+            label = "оплативших" if audience == "paid" else "верифицированных"
+            await message.answer(f"Нет {label} пользователей для рассылки голосования.")
+            return
 
-        opts_text = "\n".join(f"{i+1}. {o}" for i, o in enumerate(options))
         poll_text = (
             f"📊 <b>Голосование #{poll_id}</b>\n\n"
             f"{html.escape(data['poll_question'])}\n\n"
@@ -1342,12 +1477,12 @@ async def admin_poll_options(message: Message, state: FSMContext) -> None:
         )
 
         sent, failed = 0, 0
-        progress_msg = await message.answer(f"Рассылаю голосование... 0 / {len(verifications)}")
+        progress_msg = await message.answer(f"Рассылаю голосование... 0 / {len(recipient_ids)}")
 
-        for i, v in enumerate(verifications):
+        for i, user_id in enumerate(recipient_ids):
             try:
                 await app.bot.send_message(
-                    v["user_id"],
+                    user_id,
                     poll_text,
                     reply_markup=poll_vote_keyboard(poll_id, poll_options),
                 )
@@ -1356,7 +1491,7 @@ async def admin_poll_options(message: Message, state: FSMContext) -> None:
                 failed += 1
             if (i + 1) % 10 == 0:
                 try:
-                    await progress_msg.edit_text(f"Рассылаю голосование... {i+1} / {len(verifications)}")
+                    await progress_msg.edit_text(f"Рассылаю голосование... {i+1} / {len(recipient_ids)}")
                 except Exception:
                     pass
 
