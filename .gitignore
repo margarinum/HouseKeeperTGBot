@@ -1,0 +1,24 @@
+# Secrets and runtime
+.env
+*.session
+*.session-journal
+house_bot.db
+*.db
+
+# Logs and caches
+logs/
+__pycache__/
+*.pyc
+.pytest_cache/
+.rag_store/
+rag_store/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Archives and server dumps (local only)
+*.tar.gz
+house_bot_server/
