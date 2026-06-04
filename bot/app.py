@@ -278,6 +278,47 @@ async def get_live_group_stats() -> Dict[str, int]:
     }
 
 
+async def _group_verified_export_rows() -> list[dict]:
+    """Верифицированные участники группы: уникальные user_id (как в статистике)."""
+    assert app is not None
+    _, verified_ids, _ = await _live_membership_verification()
+    if not verified_ids:
+        return []
+
+    sqlite_by_id = {
+        r["user_id"]: r
+        for r in await app.storage.list_verifications_for_user_ids(verified_ids)
+    }
+    gas_by_id: dict[int, dict] = {}
+    for item in await app.gas.list_users():
+        user_id = _gas_user_id(item)
+        if user_id is None or user_id not in verified_ids or user_id in gas_by_id:
+            continue
+        gas_by_id[user_id] = item
+
+    rows: list[dict] = []
+    for user_id in sorted(verified_ids):
+        gas = gas_by_id.get(user_id)
+        local = sqlite_by_id.get(user_id)
+        if gas:
+            rows.append({
+                "house": gas.get("house", ""),
+                "entrance": gas.get("entrance", ""),
+                "apartment": gas.get("apartment", ""),
+                "display_name": gas.get("display_name", ""),
+                "user_id": gas.get("user_id", ""),
+            })
+        elif local:
+            rows.append({
+                "house": local.get("house", ""),
+                "entrance": local.get("entrance", ""),
+                "apartment": local.get("apartment", ""),
+                "display_name": local.get("display_name", ""),
+                "user_id": str(user_id),
+            })
+    return rows
+
+
 async def get_unverified_action_users() -> List[dict]:
     assert app is not None
     _, verified_ids, members = await _live_membership_verification()
@@ -1074,10 +1115,10 @@ async def admin_export_verified(callback: CallbackQuery) -> None:
         await callback.answer("Нет доступа", show_alert=True)
         return
 
-    users = await app.gas.list_users()
+    users = await _group_verified_export_rows()
 
     if not users:
-        await callback.message.answer("В таблице нет верифицированных пользователей.")
+        await callback.message.answer("Нет верифицированных участников группы.")
         await callback.answer()
         return
 
