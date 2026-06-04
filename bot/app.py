@@ -197,13 +197,20 @@ async def sync_group_members() -> None:
     logger.info("Membership sync complete. Human members in group: %s", len(present_ids))
 
 
-async def get_live_group_stats() -> Dict[str, int]:
+async def _live_membership_verification() -> tuple[set[int], set[int], list]:
+    """Участники группы и верифицированные среди них (админы Telegram/бота не исключаются)."""
     assert app is not None
     await sync_group_members()
     members = await app.membership.list_all_human_members()
     member_ids = {m.user_id for m in members}
     verified_records = await app.storage.list_verifications_for_user_ids(member_ids)
     verified_ids = {r["user_id"] for r in verified_records}
+    return member_ids, verified_ids, members
+
+
+async def get_live_group_stats() -> Dict[str, int]:
+    assert app is not None
+    member_ids, verified_ids, _ = await _live_membership_verification()
     return {
         "in_group": len(member_ids),
         "verified": len(verified_ids),
@@ -214,18 +221,10 @@ async def get_live_group_stats() -> Dict[str, int]:
 
 async def get_unverified_action_users() -> List[dict]:
     assert app is not None
-    await sync_group_members()
-    candidates = await app.membership.list_removable_human_members()
-    candidate_ids = {u.user_id for u in candidates}
-    if not candidate_ids:
-        return []
-    verified_records = await app.storage.list_verifications_for_user_ids(candidate_ids)
-    verified_ids = {r["user_id"] for r in verified_records}
+    _, verified_ids, members = await _live_membership_verification()
     result: List[dict] = []
-    for user in candidates:
+    for user in members:
         if user.user_id in verified_ids:
-            continue
-        if await app.storage.is_admin(user.user_id):
             continue
         result.append({"user_id": user.user_id, "username": user.username, "full_name": user.full_name})
 
