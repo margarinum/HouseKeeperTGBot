@@ -85,6 +85,7 @@ class AppContext:
         self.storage = Storage(settings.db_path)
         self.gas = GasClient(settings.gas_web_app_url, settings.gas_shared_secret)
         self.bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        self.bot_user_id: int | None = None
         self.dp = Dispatcher()
         self.dp.include_router(router)
         self.telethon = TelegramClient(settings.telethon_session, settings.api_id, settings.api_hash)
@@ -188,7 +189,7 @@ async def build_main_menu(user_id: int):
 
 async def sync_group_members() -> None:
     assert app is not None
-    members = await app.membership.list_all_human_members()
+    members = await _group_human_members()
     present_ids: List[int] = []
     for member in members:
         present_ids.append(member.user_id)
@@ -197,11 +198,55 @@ async def sync_group_members() -> None:
     logger.info("Membership sync complete. Human members in group: %s", len(present_ids))
 
 
+async def _ensure_bot_user_id() -> int | None:
+    assert app is not None
+    if app.bot_user_id is None:
+        me = await app.bot.get_me()
+        app.bot_user_id = me.id
+    return app.bot_user_id
+
+
+async def _group_human_members() -> list:
+    """Участники группы: люди, без Telegram-бота сервиса."""
+    assert app is not None
+    bot_id = await _ensure_bot_user_id()
+    members = await app.membership.list_all_human_members()
+    if bot_id is None:
+        return members
+    return [m for m in members if m.user_id != bot_id]
+
+
+def _gas_user_id(item: dict) -> int | None:
+    raw = str(item.get("user_id", "")).strip()
+    return int(raw) if raw.isdigit() else None
+
+
+def _gas_row_is_paid(item: dict) -> bool:
+    return str(item.get("payed", "0")).strip() == "1"
+
+
+async def _table_payment_user_ids() -> tuple[set[int], set[int]]:
+    """(все user_id из таблицы, user_id с payed=1 хотя бы в одной строке)."""
+    assert app is not None
+    app.gas.invalidate_cache()
+    table_users = await app.gas.list_users()
+    all_ids: set[int] = set()
+    paid_ids: set[int] = set()
+    for item in table_users:
+        user_id = _gas_user_id(item)
+        if user_id is None:
+            continue
+        all_ids.add(user_id)
+        if _gas_row_is_paid(item):
+            paid_ids.add(user_id)
+    return all_ids, paid_ids
+
+
 async def _live_membership_verification() -> tuple[set[int], set[int], list]:
-    """Участники группы и верифицированные среди них (админы Telegram/бота не исключаются)."""
+    """Участники группы (без бота) и верифицированные среди них; админы учитываются."""
     assert app is not None
     await sync_group_members()
-    members = await app.membership.list_all_human_members()
+    members = await _group_human_members()
     member_ids = {m.user_id for m in members}
     verified_records = await app.storage.list_verifications_for_user_ids(member_ids)
     verified_ids = {r["user_id"] for r in verified_records}
@@ -211,11 +256,25 @@ async def _live_membership_verification() -> tuple[set[int], set[int], list]:
 async def get_live_group_stats() -> Dict[str, int]:
     assert app is not None
     member_ids, verified_ids, _ = await _live_membership_verification()
+    all_verified_ids = {int(v["user_id"]) for v in await app.storage.list_all_verifications()}
+    table_all_ids, table_paid_ids = await _table_payment_user_ids()
+
+    verified_not_paid = sum(
+        1 for uid in verified_ids if uid in table_all_ids and uid not in table_paid_ids
+    )
+    paid_total = len(table_paid_ids)
+    paid_verified = len(table_paid_ids & all_verified_ids)
+    paid_unverified = len(table_paid_ids - all_verified_ids)
+
     return {
         "in_group": len(member_ids),
         "verified": len(verified_ids),
         "unverified": max(0, len(member_ids) - len(verified_ids)),
         "admins": await app.storage.count_admins(),
+        "verified_not_paid": verified_not_paid,
+        "paid_total": paid_total,
+        "paid_verified": paid_verified,
+        "paid_unverified": paid_unverified,
     }
 
 
@@ -557,7 +616,11 @@ async def admin_stats(callback: CallbackQuery) -> None:
         f"Всего в группе: {stats['in_group']}\n"
         f"Верифицировано: {stats['verified']}\n"
         f"Неверифицировано: {stats['unverified']}\n"
-        f"Администраторов: {stats['admins']}"
+        f"Администраторов: {stats['admins']}\n"
+        f"Верифицированные не оплатившие: {stats['verified_not_paid']}\n"
+        f"Оплативших: {stats['paid_total']}\n"
+        f"Оплатившие верифицированные: {stats['paid_verified']}\n"
+        f"Оплатившие не верифицированные: {stats['paid_unverified']}"
     )
     await callback.answer()
 
@@ -1937,6 +2000,9 @@ async def on_startup() -> None:
     assert app is not None
     await app.storage.init()
     await app.storage.seed_admins(app.settings.admin_ids)
+    me = await app.bot.get_me()
+    app.bot_user_id = me.id
+    logger.info("Bot user id cached for membership stats: %s", app.bot_user_id)
     # Init DeepSeek RAG
     knowledge_dir = os.path.join(os.path.dirname(__file__), "..", "knowledge")
     rag_dir = os.path.join(os.path.dirname(__file__), "..", "rag_store")
