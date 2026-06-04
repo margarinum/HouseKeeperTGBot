@@ -45,6 +45,7 @@ from .keyboards import (
     confirm_revoke_menu,
 )
 from .membership import MembershipManager
+from .prompt_log import log_user_ai_exchange, setup_prompt_logger
 from .storage import Storage
 
 logger = logging.getLogger(__name__)
@@ -1969,6 +1970,14 @@ async def ai_answer(message: Message, state: FSMContext) -> None:
     await state.clear()
     thinking = await message.answer("⏳ Ищу ответ...")
     answer = await app.ai.ask(topic, question)
+    log_user_ai_exchange(
+        user_id=message.from_user.id,
+        username=message.from_user.username,
+        full_name=message.from_user.full_name or "",
+        topic=topic,
+        question=question,
+        answer=answer,
+    )
     await thinking.delete()
     await message.answer(answer, reply_markup=await build_main_menu(message.from_user.id))
 
@@ -2102,6 +2111,7 @@ async def run() -> None:
     root_logger.setLevel(log_level)
     root_logger.addHandler(console_handler)
     root_logger.addHandler(file_handler)
+    setup_prompt_logger(log_dir)
     app = AppContext(settings)
     await on_startup()
     try:
