@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import logging
+from contextlib import asynccontextmanager
 from logging.handlers import TimedRotatingFileHandler
 import os
 import re
@@ -448,11 +449,12 @@ async def handle_new_chat_members(message: Message) -> None:
     group_text = f"{mentions}\n\n{new_member_instruction_text()}"
 
     try:
-        await app.bot.send_message(
-            app.settings.group_id,
-            group_text,
-            message_thread_id=app.settings.announcement_thread_id,
-        )
+        async with group_announcement_topic() as thread_id:
+            await app.bot.send_message(
+                app.settings.group_id,
+                group_text,
+                message_thread_id=thread_id,
+            )
     except Exception:
         logger.exception("Failed to send new member welcome message to group")
 
@@ -739,6 +741,54 @@ async def admin_back(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+async def _open_group_topic(chat_id: int, thread_id: int | None) -> None:
+    assert app is not None
+    if not thread_id:
+        return
+    try:
+        if thread_id == 1:
+            await app.bot.reopen_general_forum_topic(chat_id=chat_id)
+        else:
+            await app.bot.reopen_forum_topic(chat_id=chat_id, message_thread_id=thread_id)
+    except Exception:
+        logger.warning(
+            "Failed to reopen forum topic %s in chat %s",
+            thread_id,
+            chat_id,
+            exc_info=True,
+        )
+
+
+async def _close_group_topic(chat_id: int, thread_id: int | None) -> None:
+    assert app is not None
+    if not thread_id:
+        return
+    try:
+        if thread_id == 1:
+            await app.bot.close_general_forum_topic(chat_id=chat_id)
+        else:
+            await app.bot.close_forum_topic(chat_id=chat_id, message_thread_id=thread_id)
+    except Exception:
+        logger.warning(
+            "Failed to close forum topic %s in chat %s",
+            thread_id,
+            chat_id,
+            exc_info=True,
+        )
+
+
+@asynccontextmanager
+async def group_announcement_topic():
+    assert app is not None
+    chat_id = app.settings.group_id
+    thread_id = app.settings.announcement_thread_id
+    await _open_group_topic(chat_id, thread_id)
+    try:
+        yield thread_id
+    finally:
+        await _close_group_topic(chat_id, thread_id)
+
+
 async def send_group_mentions(text: str, users: List[dict]) -> int:
     assert app is not None
     if not users:
@@ -758,13 +808,14 @@ async def send_group_mentions(text: str, users: List[dict]) -> int:
     if current:
         chunks.append(current)
     sent = 0
-    for mention_chunk in chunks:
-        await app.bot.send_message(
-            app.settings.group_id,
-            f"{text}\n\n{mention_chunk}",
-            message_thread_id=app.settings.announcement_thread_id,
-        )
-        sent += 1
+    async with group_announcement_topic() as thread_id:
+        for mention_chunk in chunks:
+            await app.bot.send_message(
+                app.settings.group_id,
+                f"{text}\n\n{mention_chunk}",
+                message_thread_id=thread_id,
+            )
+            sent += 1
     return sent
 
 
