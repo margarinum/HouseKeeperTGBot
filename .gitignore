@@ -25,5 +25,8 @@ house_bot_server/
 
 # Large docs with Cyrillic names — keep on server locally, not in git
 documents/
-knowledge/
+knowledge/*
+!knowledge/**/
+!knowledge/**/*.json
 bot/knowledge/
+_tmp_docx/
