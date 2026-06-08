@@ -155,3 +155,12 @@ def faq_user_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🚗 Шлагбаум", callback_data="faq:get:barrier")],
         [InlineKeyboardButton(text="🤖 Бот", callback_data="faq:get:bot")],
     ])
+
+
+def ai_conversation_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Продолжить разговор", callback_data="ai:continue"),
+            InlineKeyboardButton(text="Завершить разговор", callback_data="ai:end"),
+        ],
+    ])

@@ -32,6 +32,7 @@ from .keyboards import (
     user_docs_keyboard,
     faq_admin_keyboard,
     faq_user_keyboard,
+    ai_conversation_keyboard,
     DOCS_BTN,
     FAQ_BTN,
     AI_BTN,
@@ -76,6 +77,7 @@ class AdminStates(StatesGroup):
     waiting_for_doc_file = State()
     waiting_for_faq_text = State()
     waiting_for_ai_question = State()
+    waiting_for_ai_choice = State()
     waiting_for_poll_question = State()
     waiting_for_poll_options = State()
     waiting_for_manual_verify_user_id = State()
@@ -2066,6 +2068,20 @@ async def user_faq_get(callback: CallbackQuery) -> None:
 # ── AI Assistant ────────────────────────────────────────────────
 
 AI_TOPICS = {"barrier": "🚗 Шлагбаум", "bot": "🤖 Бот", "general": "общий"}
+AI_HISTORY_LIMIT = 5
+AI_MENU_BUTTONS = {
+    VERIFY_BTN,
+    DELETE_VERIFY_BTN,
+    ADMIN_BTN,
+    DOCS_BTN,
+    FAQ_BTN,
+    AI_BTN,
+}
+
+
+def _ai_history_from_data(data: dict) -> list[tuple[str, str]]:
+    raw = data.get("ai_history") or []
+    return [(str(item[0]), str(item[1])) for item in raw if len(item) == 2]
 
 
 async def _ai_start_topic(message: Message, state: FSMContext, topic: str, prompt: str) -> None:
@@ -2078,9 +2094,38 @@ async def _ai_start_topic(message: Message, state: FSMContext, topic: str, promp
     if not app.ai:
         await message.answer("AI-ассистент временно недоступен.")
         return
-    await state.update_data(ai_topic=topic)
+    await state.update_data(ai_topic=topic, ai_history=[])
     await state.set_state(AdminStates.waiting_for_ai_question)
     await message.answer(prompt)
+
+
+async def _ai_reply(
+    message: Message,
+    state: FSMContext,
+    *,
+    question: str,
+    topic: str,
+    history: list[tuple[str, str]],
+) -> None:
+    assert app is not None
+    thinking = await message.answer("⏳ Ищу ответ...")
+    answer = await app.ai.ask(topic, question, history=history)
+    log_user_ai_exchange(
+        user_id=message.from_user.id,
+        username=message.from_user.username,
+        full_name=message.from_user.full_name or "",
+        topic=topic,
+        question=question,
+        answer=answer,
+    )
+    await thinking.delete()
+
+    updated_history = history + [[question, answer]]
+    if len(updated_history) > AI_HISTORY_LIMIT:
+        updated_history = updated_history[-AI_HISTORY_LIMIT:]
+    await state.update_data(ai_history=updated_history)
+    await state.set_state(AdminStates.waiting_for_ai_choice)
+    await message.answer(answer, reply_markup=ai_conversation_keyboard())
 
 
 @router.message(F.text == AI_BTN)
@@ -2097,21 +2142,74 @@ async def ai_answer(message: Message, state: FSMContext) -> None:
     if not question:
         await message.answer("Пожалуйста, введите вопрос текстом.")
         return
+    if question in AI_MENU_BUTTONS:
+        await state.clear()
+        await message.answer(
+            "Разговор с помощником завершён.",
+            reply_markup=await build_main_menu(message.from_user.id),
+        )
+        return
+
     data = await state.get_data()
     topic = data.get("ai_topic", "general")
-    await state.clear()
-    thinking = await message.answer("⏳ Ищу ответ...")
-    answer = await app.ai.ask(topic, question)
-    log_user_ai_exchange(
-        user_id=message.from_user.id,
-        username=message.from_user.username,
-        full_name=message.from_user.full_name or "",
-        topic=topic,
-        question=question,
-        answer=answer,
+    history = _ai_history_from_data(data)
+    await _ai_reply(message, state, question=question, topic=topic, history=history)
+
+
+@router.message(StateFilter(AdminStates.waiting_for_ai_choice))
+async def ai_choice_prompt(message: Message) -> None:
+    if not is_private_message(message):
+        return
+    await message.answer(
+        "Выберите «Продолжить разговор» или «Завершить разговор».",
+        reply_markup=ai_conversation_keyboard(),
     )
-    await thinking.delete()
-    await message.answer(answer, reply_markup=await build_main_menu(message.from_user.id))
+
+
+@router.callback_query(F.data == "ai:continue")
+async def ai_continue(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_private_callback(callback):
+        await reject_group_callback(callback)
+        return
+    current_state = await state.get_state()
+    if current_state != AdminStates.waiting_for_ai_choice.state:
+        await callback.answer("Сессия помощника уже завершена.", show_alert=True)
+        return
+
+    await callback.answer()
+    if callback.message:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            logger.debug("Could not remove AI choice keyboard", exc_info=True)
+
+    await state.set_state(AdminStates.waiting_for_ai_question)
+    if callback.message:
+        await callback.message.answer(
+            "Задайте дополнительный вопрос:",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+
+
+@router.callback_query(F.data == "ai:end")
+async def ai_end(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_private_callback(callback):
+        await reject_group_callback(callback)
+        return
+
+    await callback.answer()
+    if callback.message:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            logger.debug("Could not remove AI choice keyboard", exc_info=True)
+
+    await state.clear()
+    if callback.message:
+        await callback.message.answer(
+            "Разговор с помощником завершён.",
+            reply_markup=await build_main_menu(callback.from_user.id),
+        )
 
 
 @router.message()

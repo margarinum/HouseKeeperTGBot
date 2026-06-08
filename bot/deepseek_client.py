@@ -239,7 +239,12 @@ class DeepSeekClient:
         self._store._chunks = all_chunks
         logger.info("Total chunks loaded: %d", len(all_chunks))
 
-    async def ask(self, topic: str, question: str) -> str:
+    async def ask(
+        self,
+        topic: str,
+        question: str,
+        history: list[tuple[str, str]] | None = None,
+    ) -> str:
         store = self._stores.get(topic) if topic in ("barrier", "bot") else None
         chunks = store.search(question) if store else self._store.search(question)
         if not chunks:
@@ -248,12 +253,15 @@ class DeepSeekClient:
         context = "\n\n---\n\n".join(chunks)
         user_message = f"Фрагменты документов:\n\n{context}\n\nВопрос: {question}"
 
+        messages: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        for prev_q, prev_a in history or []:
+            messages.append({"role": "user", "content": prev_q})
+            messages.append({"role": "assistant", "content": prev_a})
+        messages.append({"role": "user", "content": user_message})
+
         payload = {
             "model": "deepseek-chat",
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_message},
-            ],
+            "messages": messages,
             "temperature": 0.0,
             "max_tokens": 1024,
             "stream": False,
