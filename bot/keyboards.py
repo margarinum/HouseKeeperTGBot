@@ -33,6 +33,7 @@ def admin_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Неверифицированные", callback_data="admin:unverified_actions")],
         [InlineKeyboardButton(text="Верифицированные", callback_data="admin:verified_actions")],
         [InlineKeyboardButton(text="Оплатившие", callback_data="admin:paid_actions")],
+        [InlineKeyboardButton(text="Шлагбаумы", callback_data="admin:barriers")],
         [InlineKeyboardButton(text="Синхронизировать участников с группой", callback_data="admin:sync_table")],
         [InlineKeyboardButton(text="Снять лимит регистрации на квартиру", callback_data="verified:remove_limit")],
         [InlineKeyboardButton(text="Администраторы", callback_data="admin:list_admins")],
@@ -72,6 +73,15 @@ def paid_actions_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Экспорт оплативших", callback_data="paid:export")],
         [InlineKeyboardButton(text="Отправить сообщение", callback_data="paid:broadcast")],
         [InlineKeyboardButton(text="Создать голосование", callback_data="paid:create_poll")],
+        [InlineKeyboardButton(text="Назад", callback_data="admin:back")],
+    ])
+
+
+def barriers_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="5к2", callback_data="barrier:open:5k2")],
+        [InlineKeyboardButton(text="3к4 (север)", callback_data="barrier:open:3k4_north")],
+        [InlineKeyboardButton(text="3к4 (юг)", callback_data="barrier:open:3k4_south")],
         [InlineKeyboardButton(text="Назад", callback_data="admin:back")],
     ])
 

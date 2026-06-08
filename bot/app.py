@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 import logging
 from contextlib import asynccontextmanager
 from logging.handlers import TimedRotatingFileHandler
@@ -21,6 +22,7 @@ from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove, BufferedI
 from telethon import TelegramClient
 
 from .config import Settings, load_settings
+from .barrier_client import BARRIERS, BarrierClient, BarrierClientError
 from .gas_client import GasClient, GasClientError
 from .deepseek_client import DeepSeekClient
 from .keyboards import (
@@ -43,6 +45,7 @@ from .keyboards import (
     unverified_actions_menu,
     verified_actions_menu,
     paid_actions_menu,
+    barriers_menu,
     confirm_revoke_menu,
 )
 from .membership import MembershipManager
@@ -86,6 +89,12 @@ class AppContext:
         self.settings = settings
         self.storage = Storage(settings.db_path)
         self.gas = GasClient(settings.gas_web_app_url, settings.gas_shared_secret)
+        self.barrier = BarrierClient(
+            settings.barrier_api_url,
+            settings.barrier_login,
+            settings.barrier_password,
+            settings.barrier_device_key,
+        )
         self.bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
         self.bot_user_id: int | None = None
         self.dp = Dispatcher()
@@ -1902,6 +1911,78 @@ async def user_docs_get(callback: CallbackQuery) -> None:
         caption=doc["name"],
     )
     await callback.answer()
+
+
+# ── Admin: Barriers ─────────────────────────────────────────────
+
+def _format_barrier_response(label: str, response) -> str:
+    status = "✅ Успех" if response.ok else "❌ Ошибка"
+    lines = [f"🚧 <b>{html.escape(label)}</b>", status]
+    if response.message:
+        lines.append(f"Ответ сервера: {html.escape(response.message)}")
+    lines.append(f"<code>{html.escape(json.dumps(response.raw, ensure_ascii=False))}</code>")
+    return "\n".join(lines)
+
+
+@router.callback_query(F.data == "admin:barriers")
+async def admin_barriers_menu(callback: CallbackQuery) -> None:
+    if not is_private_callback(callback):
+        await reject_group_callback(callback)
+        return
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    assert app is not None
+    if not app.barrier.configured:
+        await callback.message.answer(
+            "🚧 <b>Шлагбаумы</b>\n"
+            "API не настроен. Добавьте в .env переменные "
+            "BARRIER_LOGIN, BARRIER_PASSWORD и BARRIER_DEVICE_KEY.",
+            reply_markup=barriers_menu(),
+        )
+    else:
+        await callback.message.answer(
+            "🚧 <b>Шлагбаумы</b>\nВыберите шлагбаум для открытия:",
+            reply_markup=barriers_menu(),
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("barrier:open:"))
+async def admin_barrier_open(callback: CallbackQuery) -> None:
+    if not is_private_callback(callback):
+        await reject_group_callback(callback)
+        return
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    assert app is not None
+    if not app.barrier.configured:
+        await callback.answer("API шлагбаумов не настроен", show_alert=True)
+        return
+
+    barrier_key = callback.data.removeprefix("barrier:open:")
+    barrier = BARRIERS.get(barrier_key)
+    if not barrier:
+        await callback.answer("Неизвестный шлагбаум", show_alert=True)
+        return
+
+    label = str(barrier["label"])
+    await callback.answer(f"Открываю {label}…")
+    status_msg = await callback.message.answer(f"🚧 Открываю <b>{html.escape(label)}</b>…")
+
+    try:
+        response = await app.barrier.open_barrier(barrier_key)
+        text = _format_barrier_response(label, response)
+    except BarrierClientError as exc:
+        logger.warning("Barrier open failed (%s): %s", barrier_key, exc)
+        text = (
+            f"🚧 <b>{html.escape(label)}</b>\n"
+            f"❌ Ошибка\n"
+            f"{html.escape(str(exc))}"
+        )
+
+    await status_msg.edit_text(text)
 
 
 # ── Admin: FAQ ──────────────────────────────────────────────────

@@ -17,6 +17,10 @@ class Settings:
     telethon_session: str
     announcement_thread_id: int | None
     deepseek_api_key: str
+    barrier_api_url: str
+    barrier_login: str
+    barrier_password: str
+    barrier_device_key: str
 
 def req(name: str) -> str:
     value = os.getenv(name, '').strip()
@@ -42,4 +46,8 @@ def load_settings() -> Settings:
         telethon_session=os.getenv('TELETHON_SESSION', 'house_bot_session').strip() or 'house_bot_session',
         announcement_thread_id=int(os.getenv('ANNOUNCEMENT_THREAD_ID', '0').strip()) or None,
         deepseek_api_key=os.getenv('DEEPSEEK_API_KEY', '').strip(),
+        barrier_api_url=os.getenv('BARRIER_API_URL', 'https://lk.amvideo-msk.ru/api/api4.php').strip(),
+        barrier_login=os.getenv('BARRIER_LOGIN', '').strip(),
+        barrier_password=os.getenv('BARRIER_PASSWORD', '').strip(),
+        barrier_device_key=os.getenv('BARRIER_DEVICE_KEY', '').strip(),
     )
