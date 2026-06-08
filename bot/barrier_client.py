@@ -39,7 +39,7 @@ class BarrierApiResponse:
 class BarrierClient:
     def __init__(self, api_url: str, login: str, password: str, device_key: str):
         self.api_url = api_url
-        self.login = login
+        self.login_phone = login
         self.password = password
         self.device_key = device_key
         self._ssl_context = ssl.create_default_context()
@@ -48,7 +48,7 @@ class BarrierClient:
 
     @property
     def configured(self) -> bool:
-        return bool(self.api_url and self.login and self.password and self.device_key)
+        return bool(self.api_url and self.login_phone and self.password and self.device_key)
 
     async def _post(self, payload: dict) -> dict:
         connector = aiohttp.TCPConnector(ssl=self._ssl_context)
@@ -72,10 +72,10 @@ class BarrierClient:
             raise BarrierClientError(f"Неожиданный ответ сервера: {text[:300]}")
         return data
 
-    async def login(self) -> str:
+    async def fetch_sid(self) -> str:
         data = await self._post({
             "type": "login",
-            "login": self.login,
+            "login": self.login_phone,
             "password": self.password,
             "device_key": self.device_key,
         })
@@ -91,7 +91,7 @@ class BarrierClient:
         if not barrier:
             raise BarrierClientError(f"Неизвестный шлагбаум: {barrier_key}")
 
-        sid = await self.login()
+        sid = await self.fetch_sid()
         data = await self._post({
             "type": "open",
             "id_shlag": str(barrier["id_shlag"]),
