@@ -20,7 +20,7 @@ class Settings:
     barrier_api_url: str
     barrier_login: str
     barrier_password: str
-    barrier_device_key: str
+    barrier_config_path: str
 
 def req(name: str) -> str:
     value = os.getenv(name, '').strip()
@@ -47,7 +47,7 @@ def load_settings() -> Settings:
         announcement_thread_id=int(os.getenv('ANNOUNCEMENT_THREAD_ID', '0').strip()) or None,
         deepseek_api_key=os.getenv('DEEPSEEK_API_KEY', '').strip(),
         barrier_api_url=os.getenv('BARRIER_API_URL', 'https://lk.amvideo-msk.ru/api/api4.php').strip(),
-        barrier_login=os.getenv('BARRIER_LOGIN', '').strip(),
-        barrier_password=os.getenv('BARRIER_PASSWORD', '').strip(),
-        barrier_device_key=os.getenv('BARRIER_DEVICE_KEY', '').strip(),
+        barrier_login=os.getenv('BARRIER_LOGIN', '79163279251').strip(),
+        barrier_password=os.getenv('BARRIER_PASSWORD', 'd@stra11').strip(),
+        barrier_config_path=os.getenv('BARRIER_CONFIG_PATH', 'config.json').strip() or 'config.json',
     )

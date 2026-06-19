@@ -5,6 +5,9 @@
 house_bot.db
 *.db
 
+# Barrier runtime config (device_key/sid)
+config.json
+
 # Logs and caches
 logs/
 __pycache__/

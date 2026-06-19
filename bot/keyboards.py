@@ -79,9 +79,9 @@ def paid_actions_menu() -> InlineKeyboardMarkup:
 
 def barriers_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="5к2", callback_data="barrier:open:5k2")],
-        [InlineKeyboardButton(text="3к4 (север)", callback_data="barrier:open:3k4_north")],
-        [InlineKeyboardButton(text="3к4 (юг)", callback_data="barrier:open:3k4_south")],
+        [InlineKeyboardButton(text="3К4 СЕВЕР", callback_data="barrier:open:3k4_north")],
+        [InlineKeyboardButton(text="3К4 ЮГ", callback_data="barrier:open:3k4_south")],
+        [InlineKeyboardButton(text="5К3", callback_data="barrier:open:5k3")],
         [InlineKeyboardButton(text="Назад", callback_data="admin:back")],
     ])
 
