@@ -1928,18 +1928,21 @@ async def _open_barrier_and_report(
         response = await app.barrier.open_barrier(barrier_key, pin=pin)
     except ChangeDeviceRequired:
         # Запоминаем выбранный шлагбаум и ждём PIN из SMS
+        logger.info("Требуется PIN для шлагбаума '%s', ожидаем ввод от пользователя", barrier_key)
         await state.set_state(AdminStates.waiting_for_barrier_pin)
         await state.update_data(barrier_pin_key=barrier_key)
         await target.answer("Введите PIN из SMS")
         return
     except BarrierClientError as exc:
-        logger.warning("Barrier open failed (%s): %s", barrier_key, exc)
+        logger.warning("Не удалось открыть шлагбаум '%s': %s", barrier_key, exc)
         await target.answer(f"❌ Ошибка: {html.escape(str(exc))}")
         return
 
     if response.ok:
+        logger.info("Шлагбаум '%s' успешно открыт", barrier_key)
         await target.answer("✅ Открыт")
     else:
+        logger.info("Сервер вернул ошибку для '%s': %s", barrier_key, response.message)
         await target.answer(f"❌ Ошибка: {html.escape(response.message or 'неизвестная ошибка')}")
 
 
@@ -1973,6 +1976,11 @@ async def admin_barrier_open(callback: CallbackQuery, state: FSMContext) -> None
         await callback.answer("Неизвестный шлагбаум", show_alert=True)
         return
 
+    logger.info(
+        "Админ %s нажал кнопку открытия шлагбаума '%s'",
+        callback.from_user.id,
+        barrier_key,
+    )
     await callback.answer(f"Открываю {barrier['label']}…")
     await _open_barrier_and_report(callback.message, state, barrier_key)
 
@@ -1991,6 +1999,11 @@ async def admin_barrier_pin(message: Message, state: FSMContext) -> None:
 
     if not barrier_key:
         return
+    logger.info(
+        "Получен PIN от админа %s для шлагбаума '%s', повторяем логин",
+        message.from_user.id,
+        barrier_key,
+    )
     await _open_barrier_and_report(message, state, barrier_key, pin=pin)
 
 
