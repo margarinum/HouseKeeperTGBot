@@ -14,9 +14,9 @@ logger = logging.getLogger(__name__)
 BARRIER_API_URL = "https://lk.amvideo-msk.ru/api/api4.php"
 
 BARRIERS: dict[str, dict[str, int | str]] = {
-    "3k4_north": {"label": "3К4 СЕВЕР", "id_shlag": 3146, "relay": 0},
-    "3k4_south": {"label": "3К4 ЮГ", "id_shlag": 3147, "relay": 0},
-    "5k3": {"label": "5К3", "id_shlag": 3148, "relay": 0},
+    "3k4_north": {"label": "3К4 СЕВЕР", "id_shlag": 3147, "relay": 0},
+    "3k4_south": {"label": "3К4 ЮГ", "id_shlag": 3148, "relay": 0},
+    "5k3": {"label": "5К3", "id_shlag": 3146, "relay": 0},
 }
 
 # Ключи payload, которые нужно маскировать в логах
