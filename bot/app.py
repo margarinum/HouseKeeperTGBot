@@ -2009,6 +2009,49 @@ async def admin_barrier_pin(message: Message, state: FSMContext) -> None:
 
 # ── Admin: FAQ ──────────────────────────────────────────────────
 
+FAQ_DONE_WORD = "готово"
+
+
+def _faq_label(key: str) -> str:
+    return "Шлагбаум" if key == "barrier" else "Бот"
+
+
+def _message_to_faq_item(message: Message) -> dict | None:
+    if message.text:
+        text = message.text.strip()
+        if text:
+            return {"type": "text", "text": text}
+    if message.photo:
+        item: dict = {"type": "photo", "file_id": message.photo[-1].file_id}
+        if message.caption:
+            item["caption"] = message.caption.strip()
+        return item
+    if message.document:
+        item = {"type": "document", "file_id": message.document.file_id}
+        if message.caption:
+            item["caption"] = message.caption.strip()
+        return item
+    if message.video:
+        item = {"type": "video", "file_id": message.video.file_id}
+        if message.caption:
+            item["caption"] = message.caption.strip()
+        return item
+    return None
+
+
+async def _send_faq_item(bot: Bot, chat_id: int, item: dict) -> None:
+    item_type = item.get("type")
+    caption = item.get("caption")
+    if item_type == "text":
+        await bot.send_message(chat_id, item["text"])
+    elif item_type == "photo":
+        await bot.send_photo(chat_id, item["file_id"], caption=caption)
+    elif item_type == "document":
+        await bot.send_document(chat_id, item["file_id"], caption=caption)
+    elif item_type == "video":
+        await bot.send_video(chat_id, item["file_id"], caption=caption)
+
+
 @router.callback_query(F.data == "admin:faq")
 async def admin_faq_menu(callback: CallbackQuery) -> None:
     if not is_private_callback(callback):
@@ -2033,10 +2076,15 @@ async def admin_faq_edit(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Нет доступа", show_alert=True)
         return
     key = callback.data.split(":")[2]
-    label = "Шлагбаум" if key == "barrier" else "Бот"
-    await state.update_data(faq_key=key)
+    label = _faq_label(key)
+    await state.update_data(faq_key=key, faq_items=[])
     await state.set_state(AdminStates.waiting_for_faq_text)
-    await callback.message.answer(f"Введите текст ответа для раздела <b>{label}</b>:")
+    await callback.message.answer(
+        f"Отправьте сообщения для раздела <b>{label}</b>:\n"
+        "текст, фото, видео или документы (можно несколько).\n"
+        "Когда закончите, напишите <b>Готово</b>.\n"
+        "Для отмены нажмите Отмена."
+    )
     await callback.answer()
 
 
@@ -2045,18 +2093,34 @@ async def admin_faq_save(message: Message, state: FSMContext) -> None:
     assert app is not None
     if not is_private_message(message) or not await is_admin(message.from_user.id):
         return
-    text = (message.text or "").strip()
-    if not text:
-        await message.answer("Текст не может быть пустым.")
-        return
     data = await state.get_data()
     key = data["faq_key"]
-    await app.storage.set_faq(key, text)
-    await state.clear()
-    label = "Шлагбаум" if key == "barrier" else "Бот"
+    text = (message.text or "").strip()
+
+    if text.lower() == FAQ_DONE_WORD:
+        items = data.get("faq_items", [])
+        if not items:
+            await message.answer("Добавьте хотя бы одно сообщение.")
+            return
+        await app.storage.set_faq_items(key, items)
+        await state.clear()
+        label = _faq_label(key)
+        await message.answer(
+            f"✅ Ответ для раздела <b>{label}</b> сохранён ({len(items)} сообщ.).",
+            reply_markup=await build_main_menu(message.from_user.id),
+        )
+        return
+
+    item = _message_to_faq_item(message)
+    if not item:
+        await message.answer("Поддерживаются текст, фото, видео и документы.")
+        return
+
+    items = data.get("faq_items", [])
+    items.append(item)
+    await state.update_data(faq_items=items)
     await message.answer(
-        f"✅ Ответ для раздела <b>{label}</b> сохранён.",
-        reply_markup=await build_main_menu(message.from_user.id),
+        f"Добавлено ({len(items)}). Отправьте ещё или напишите <b>Готово</b>."
     )
 
 
@@ -2076,12 +2140,14 @@ async def user_faq_get(callback: CallbackQuery) -> None:
         await reject_group_callback(callback)
         return
     key = callback.data.split(":")[2]
-    text = await app.storage.get_faq(key)
-    label = "Шлагбаум" if key == "barrier" else "Бот"
-    if not text:
+    items = await app.storage.get_faq_items(key)
+    label = _faq_label(key)
+    if not items:
         await callback.answer(f"Ответ для раздела «{label}» ещё не добавлен администратором.", show_alert=True)
         return
-    await callback.message.answer(f"<b>{label}</b>\n\n{text}")
+    await callback.message.answer(f"<b>{label}</b>")
+    for item in items:
+        await _send_faq_item(app.bot, callback.message.chat.id, item)
     await callback.answer()
 
 

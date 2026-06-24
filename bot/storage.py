@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 from typing import Iterable
@@ -356,16 +357,25 @@ class Storage:
 
     # ── FAQ ────────────────────────────────────────────────────
 
-    async def set_faq(self, key: str, text: str) -> None:
+    async def set_faq_items(self, key: str, items: list[dict]) -> None:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO faq(key, text, updated_at) VALUES (?, ?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET text=excluded.text, updated_at=excluded.updated_at",
-                (key, text, now_iso()),
+                (key, json.dumps(items, ensure_ascii=False), now_iso()),
             )
             conn.commit()
 
-    async def get_faq(self, key: str) -> str | None:
+    async def get_faq_items(self, key: str) -> list[dict]:
         with self._connect() as conn:
             row = conn.execute("SELECT text FROM faq WHERE key=?", (key,)).fetchone()
-            return row["text"] if row else None
+            if not row:
+                return []
+            raw = row["text"]
+            try:
+                items = json.loads(raw)
+                if isinstance(items, list):
+                    return items
+            except json.JSONDecodeError:
+                pass
+            return [{"type": "text", "text": raw}]
